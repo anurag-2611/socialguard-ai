@@ -1,0 +1,504 @@
+// SocialGuard AI — relational schema (Phase 3)
+// Conventions: uuid PKs, snake_case columns/tables, created_at/updated_at everywhere,
+// soft delete (deleted_at) on profiles/cases/users only. audit_logs is append-only (trigger in migration).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Platform {
+  INSTAGRAM
+  FACEBOOK
+  X
+
+  @@map("platform")
+}
+
+enum ProviderKind {
+  MOCK
+  MANUAL
+  OFFICIAL
+
+  @@map("provider_kind")
+}
+
+enum RiskLevel {
+  LOW
+  MEDIUM
+  HIGH
+
+  @@map("risk_level")
+}
+
+enum JobStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED_PROVIDER
+  FAILED_ML
+  FAILED_VALIDATION
+
+  @@map("job_status")
+}
+
+enum ModelStatus {
+  STAGED
+  ACTIVE
+  RETIRED
+
+  @@map("model_status")
+}
+
+enum CaseStatus {
+  NEW
+  UNDER_REVIEW
+  EVIDENCE_REQUIRED
+  APPROVED_FOR_REPORTING
+  REPORT_SUBMITTED
+  PLATFORM_REVIEW
+  RESOLVED
+  REJECTED
+  FALSE_POSITIVE
+  CLOSED
+
+  @@map("case_status")
+}
+
+enum CasePriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+
+  @@map("case_priority")
+}
+
+enum EvidenceType {
+  PROFILE_METADATA
+  EXTRACTED_FEATURES
+  MODEL_OUTPUT
+  UPLOADED_IMAGE
+  ANALYST_OBSERVATION
+  EXTERNAL_REFERENCE
+
+  @@map("evidence_type")
+}
+
+enum ReportStatus {
+  DRAFT
+  GENERATED
+  SUBMITTED
+  FAILED
+  CANCELLED
+
+  @@map("report_status")
+}
+
+enum AuditOutcome {
+  SUCCESS
+  DENIED
+  FAILURE
+
+  @@map("audit_outcome")
+}
+
+// ───────────── Identity & access ─────────────
+
+model User {
+  id           String    @id @default(uuid()) @db.Uuid
+  email        String    @unique
+  passwordHash String    @map("password_hash")
+  displayName  String    @map("display_name")
+  isActive     Boolean   @default(true) @map("is_active")
+  lastLoginAt  DateTime? @map("last_login_at") @db.Timestamptz(6)
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt    DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  roles                UserRole[]
+  refreshTokens        RefreshToken[]
+  profilesCreated      SocialProfile[]
+  jobsRequested        AnalysisJob[]
+  casesCreated         Case[]               @relation("CaseCreatedBy")
+  casesAsAnalyst       Case[]               @relation("CaseAnalyst")
+  casesAsReviewer      Case[]               @relation("CaseReviewer")
+  statusChanges        CaseStatusHistory[]
+  notes                CaseNote[]
+  evidenceCreated      Evidence[]
+  reportsGenerated     Report[]
+  notifications        Notification[]
+  auditLogs            AuditLog[]
+  configUpdates        SystemConfig[]
+
+  @@map("users")
+}
+
+model Role {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String   @unique // SUPER_ADMIN | ANALYST | REVIEWER | READ_ONLY
+  description String
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  users       UserRole[]
+  permissions RolePermission[]
+
+  @@map("roles")
+}
+
+model Permission {
+  id          String   @id @default(uuid()) @db.Uuid
+  key         String   @unique // e.g. cases.review
+  description String
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  roles RolePermission[]
+
+  @@map("permissions")
+}
+
+model RolePermission {
+  roleId       String @map("role_id") @db.Uuid
+  permissionId String @map("permission_id") @db.Uuid
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+model UserRole {
+  userId     String   @map("user_id") @db.Uuid
+  roleId     String   @map("role_id") @db.Uuid
+  assignedAt DateTime @default(now()) @map("assigned_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [id], onDelete: Restrict)
+
+  @@id([userId, roleId])
+  @@index([roleId])
+  @@map("user_roles")
+}
+
+// Only a hash of the refresh token is stored. family_id enables reuse detection:
+// presenting a revoked token revokes every token in the family.
+model RefreshToken {
+  id           String    @id @default(uuid()) @db.Uuid
+  userId       String    @map("user_id") @db.Uuid
+  tokenHash    String    @unique @map("token_hash")
+  familyId     String    @map("family_id") @db.Uuid
+  expiresAt    DateTime  @map("expires_at") @db.Timestamptz(6)
+  revokedAt    DateTime? @map("revoked_at") @db.Timestamptz(6)
+  replacedById String?   @map("replaced_by_id") @db.Uuid
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([familyId])
+  @@index([expiresAt])
+  @@map("refresh_tokens")
+}
+
+// ───────────── Profiles, features, detections ─────────────
+
+model SocialProfile {
+  id          String       @id @default(uuid()) @db.Uuid
+  platform    Platform
+  handle      String
+  profileUrl  String       @map("profile_url")
+  dataSource  ProviderKind @map("data_source")
+  isDemoData  Boolean      @default(false) @map("is_demo_data") // keeps DEMO and REAL AUTHORIZED data separable
+  // Minimal public-metadata snapshot only. No private data, no messages.
+  metadata    Json         @default("{}")
+  fetchedAt   DateTime?    @map("fetched_at") @db.Timestamptz(6)
+  createdById String       @map("created_by_id") @db.Uuid
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt   DateTime?    @map("deleted_at") @db.Timestamptz(6)
+
+  createdBy   User             @relation(fields: [createdById], references: [id])
+  features    ProfileFeature[]
+  detections  DetectionResult[]
+  jobs        AnalysisJob[]
+  cases       Case[]
+
+  @@unique([platform, handle])
+  @@index([createdById])
+  @@index([deletedAt])
+  @@map("social_profiles")
+}
+
+model AnalysisJob {
+  id            String     @id @default(uuid()) @db.Uuid
+  profileId     String?    @map("profile_id") @db.Uuid
+  requestedById String     @map("requested_by_id") @db.Uuid
+  platform      Platform
+  profileUrl    String     @map("profile_url")
+  status        JobStatus  @default(PENDING)
+  attempts      Int        @default(0)
+  errorCode     String?    @map("error_code")
+  requestId     String     @map("request_id")
+  startedAt     DateTime?  @map("started_at") @db.Timestamptz(6)
+  finishedAt    DateTime?  @map("finished_at") @db.Timestamptz(6)
+  createdAt     DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  profile     SocialProfile?   @relation(fields: [profileId], references: [id])
+  requestedBy User             @relation(fields: [requestedById], references: [id])
+  features    ProfileFeature[]
+  detection   DetectionResult?
+
+  @@index([status, createdAt])
+  @@index([requestedById])
+  @@index([requestId])
+  @@map("analysis_jobs")
+}
+
+model ProfileFeature {
+  id                   String   @id @default(uuid()) @db.Uuid
+  profileId            String   @map("profile_id") @db.Uuid
+  jobId                String?  @map("job_id") @db.Uuid
+  features             Json
+  unavailableFields    String[] @map("unavailable_fields") // explicit UNAVAILABLE, never invented
+  featureSchemaVersion String   @map("feature_schema_version")
+  extractedAt          DateTime @default(now()) @map("extracted_at") @db.Timestamptz(6)
+
+  profile    SocialProfile     @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  job        AnalysisJob?      @relation(fields: [jobId], references: [id])
+  detections DetectionResult[]
+
+  @@index([profileId, extractedAt])
+  @@map("profile_features")
+}
+
+model ModelVersion {
+  id                   String      @id @default(uuid()) @db.Uuid
+  name                 String
+  version              String
+  datasetVersion       String      @map("dataset_version")
+  featureSchemaVersion String      @map("feature_schema_version")
+  metrics              Json
+  artifactUri          String      @map("artifact_uri")
+  status               ModelStatus @default(STAGED)
+  trainedAt            DateTime    @map("trained_at") @db.Timestamptz(6)
+  activatedAt          DateTime?   @map("activated_at") @db.Timestamptz(6)
+  createdAt            DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime    @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  detections DetectionResult[]
+
+  @@unique([name, version])
+  @@map("model_versions")
+}
+
+model DetectionResult {
+  id                String    @id @default(uuid()) @db.Uuid
+  profileId         String    @map("profile_id") @db.Uuid
+  featureSetId      String    @map("feature_set_id") @db.Uuid
+  modelVersionId    String    @map("model_version_id") @db.Uuid
+  jobId             String?   @unique @map("job_id") @db.Uuid
+  riskProbability   Decimal   @map("risk_probability") @db.Decimal(6, 5)
+  riskLevel         RiskLevel @map("risk_level")
+  // Thresholds in force at prediction time -> old results stay reproducible after config changes.
+  thresholdsSnapshot Json     @map("thresholds_snapshot")
+  // Per-feature contributions. MODEL SIGNAL, not proven fact.
+  explanations      Json
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  profile      SocialProfile  @relation(fields: [profileId], references: [id])
+  featureSet   ProfileFeature @relation(fields: [featureSetId], references: [id])
+  modelVersion ModelVersion   @relation(fields: [modelVersionId], references: [id])
+  job          AnalysisJob?   @relation(fields: [jobId], references: [id])
+  cases        Case[]
+  evidence     Evidence[]
+
+  @@index([profileId, createdAt])
+  @@index([riskLevel, createdAt])
+  @@index([modelVersionId])
+  @@map("detection_results")
+}
+
+// ───────────── Case workflow ─────────────
+
+model Case {
+  id                 String       @id @default(uuid()) @db.Uuid
+  caseNumber         String       @unique @map("case_number") // CASE-YYYY-NNNNNN
+  profileId          String       @map("profile_id") @db.Uuid
+  detectionId        String       @map("detection_id") @db.Uuid
+  status             CaseStatus   @default(NEW)
+  priority           CasePriority @default(NORMAL)
+  createdById        String?      @map("created_by_id") @db.Uuid // null = auto-created by system
+  assignedAnalystId  String?      @map("assigned_analyst_id") @db.Uuid
+  assignedReviewerId String?      @map("assigned_reviewer_id") @db.Uuid
+  resolution         String?
+  resolvedAt         DateTime?    @map("resolved_at") @db.Timestamptz(6)
+  createdAt          DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt          DateTime?    @map("deleted_at") @db.Timestamptz(6)
+
+  profile          SocialProfile       @relation(fields: [profileId], references: [id])
+  detection        DetectionResult     @relation(fields: [detectionId], references: [id])
+  createdBy        User?               @relation("CaseCreatedBy", fields: [createdById], references: [id])
+  assignedAnalyst  User?               @relation("CaseAnalyst", fields: [assignedAnalystId], references: [id])
+  assignedReviewer User?               @relation("CaseReviewer", fields: [assignedReviewerId], references: [id])
+  history          CaseStatusHistory[]
+  notes            CaseNote[]
+  evidence         Evidence[]
+  reports          Report[]
+  notifications    Notification[]
+
+  @@index([status, createdAt])
+  @@index([assignedAnalystId])
+  @@index([assignedReviewerId])
+  @@index([profileId])
+  @@index([deletedAt])
+  @@map("cases")
+}
+
+model CaseStatusHistory {
+  id          String      @id @default(uuid()) @db.Uuid
+  caseId      String      @map("case_id") @db.Uuid
+  fromStatus  CaseStatus? @map("from_status")
+  toStatus    CaseStatus  @map("to_status")
+  changedById String?     @map("changed_by_id") @db.Uuid
+  reason      String?
+  createdAt   DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  case      Case  @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  changedBy User? @relation(fields: [changedById], references: [id])
+
+  @@index([caseId, createdAt])
+  @@map("case_status_history")
+}
+
+model CaseNote {
+  id        String   @id @default(uuid()) @db.Uuid
+  caseId    String   @map("case_id") @db.Uuid
+  authorId  String   @map("author_id") @db.Uuid
+  body      String
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  case   Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  author User @relation(fields: [authorId], references: [id])
+
+  @@index([caseId, createdAt])
+  @@map("case_notes")
+}
+
+model Evidence {
+  id          String       @id @default(uuid()) @db.Uuid
+  caseId      String?      @map("case_id") @db.Uuid
+  detectionId String?      @map("detection_id") @db.Uuid
+  type        EvidenceType
+  source      String
+  description String
+  content     Json?        // structured evidence (metadata, features, model output)
+  storageKey  String?      @map("storage_key") // object-store key for uploaded files
+  sha256      String       // integrity identifier of content/file at capture time
+  capturedAt  DateTime     @map("captured_at") @db.Timestamptz(6)
+  createdById String?      @map("created_by_id") @db.Uuid
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  case      Case?            @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  detection DetectionResult? @relation(fields: [detectionId], references: [id])
+  createdBy User?            @relation(fields: [createdById], references: [id])
+
+  @@index([caseId])
+  @@index([detectionId])
+  @@index([sha256])
+  @@map("evidence")
+}
+
+model Report {
+  id                String       @id @default(uuid()) @db.Uuid
+  caseId            String       @map("case_id") @db.Uuid
+  status            ReportStatus @default(DRAFT)
+  providerKey       String       @map("provider_key") // e.g. manual-export
+  externalReference String?      @map("external_reference") // platform ticket id, if any
+  storageKey        String?      @map("storage_key")
+  sha256            String?
+  generatedById     String       @map("generated_by_id") @db.Uuid
+  generatedAt       DateTime?    @map("generated_at") @db.Timestamptz(6)
+  submittedAt       DateTime?    @map("submitted_at") @db.Timestamptz(6)
+  createdAt         DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  case        Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  generatedBy User @relation(fields: [generatedById], references: [id])
+
+  @@index([caseId])
+  @@index([status])
+  @@map("reports")
+}
+
+// ───────────── Integrations, ops ─────────────
+
+model PlatformIntegration {
+  id        String       @id @default(uuid()) @db.Uuid
+  platform  Platform
+  kind      ProviderKind
+  enabled   Boolean      @default(false)
+  // Non-secret settings only. Credentials live in Secrets Manager, never here.
+  settings  Json         @default("{}")
+  createdAt DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([platform, kind])
+  @@map("platform_integrations")
+}
+
+model AuditLog {
+  id         BigInt       @id @default(autoincrement())
+  occurredAt DateTime     @default(now()) @map("occurred_at") @db.Timestamptz(6)
+  actorId    String?      @map("actor_id") @db.Uuid
+  action     String
+  entityType String       @map("entity_type")
+  entityId   String?      @map("entity_id")
+  outcome    AuditOutcome @default(SUCCESS)
+  requestId  String?      @map("request_id")
+  ipHash     String?      @map("ip_hash") // hashed, not raw IP
+  details    Json         @default("{}")
+
+  actor User? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([occurredAt])
+  @@index([actorId, occurredAt])
+  @@index([entityType, entityId])
+  @@index([action])
+  @@map("audit_logs")
+}
+
+model Notification {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  caseId    String?   @map("case_id") @db.Uuid
+  type      String
+  title     String
+  body      String
+  readAt    DateTime? @map("read_at") @db.Timestamptz(6)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  case Case? @relation(fields: [caseId], references: [id], onDelete: SetNull)
+
+  @@index([userId, readAt])
+  @@map("notifications")
+}
+
+model SystemConfig {
+  key         String   @id // e.g. risk_thresholds, retention_days
+  value       Json
+  updatedById String?  @map("updated_by_id") @db.Uuid
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  updatedBy User? @relation(fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@map("system_config")
+}

@@ -1,0 +1,19 @@
+{
+  "model_name": "logreg-baseline",
+  "model_version": "local",
+  "dataset_version": "synthetic_v1",
+  "dataset_kind": "SYNTHETIC",
+  "feature_schema_version": "fs-1",
+  "algorithm": "LogisticRegression (L2 default, lbfgs)",
+  "class_weight": null,
+  "C": 0.01,
+  "seed": 42,
+  "trained_at": "2026-10-17T09:33:02.260270+00:00",
+  "sklearn_version": "1.9.1",
+  "python_version": "3.12.10",
+  "label_semantics": {
+    "0": "likely genuine",
+    "1": "suspicious/fake"
+  },
+  "model_sha256": "7f001f8d7dceecc64924b456d1fc0309d32bb72739693a96d1123658a400b8ea"
+}

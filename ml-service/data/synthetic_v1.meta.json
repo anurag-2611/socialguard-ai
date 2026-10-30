@@ -1,0 +1,12 @@
+{
+  "dataset_version": "synthetic_v1",
+  "dataset_kind": "SYNTHETIC",
+  "generator_version": "1.0",
+  "generator_profile": "default",
+  "seed": 2026,
+  "rows": 20000,
+  "label_prevalence": 0.17785,
+  "label_noise": 0.03,
+  "created_at": "2026-10-10T16:23:40.004140+00:00",
+  "warning": "DEMO DATA. Synthetic; not valid evidence of real-world model performance."
+}

@@ -1,0 +1,15 @@
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.mypy]
+strict = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = ["ignore::FutureWarning"]
+pythonpath = ["."]
+
+[[tool.mypy.overrides]]
+module = ["sklearn.*", "joblib.*", "pandas.*"]
+ignore_missing_imports = true

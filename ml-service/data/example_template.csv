@@ -1,0 +1,13 @@
+username,official_username,account_age_days,followers,following,posts,bio,has_profile_image,external_link_present,verified,image_similarity,repeated_content_ratio,label
+mira.kowalski,acmebank,1500,820,410,600,photos and coffee,True,False,False,0.05,0.02,0
+dev_arjun91,acmebank,640,310,280,150,software dev and chess,True,False,,0.03,,0
+acmebank_fans,acmebank,900,2400,350,420,fan page for acmebank news,True,True,False,0.35,0.08,0
+newhere2026,acmebank,12,25,90,3,hello world,True,False,,0.02,0.01,0
+lena.photo,,2100,5600,620,1800,wedding photographer,True,True,False,,0.04,0
+travelwithsam,acmebank,380,1200,540,260,,True,False,,0.04,,0
+acmebank_official1,acmebank,9,35,1200,120,giveaway dm to claim crypto,True,True,False,0.91,0.60,1
+acmeb4nk_support,acmebank,22,60,900,45,customer support dm us your details,True,True,False,0.88,0.40,1
+promo_king88231,,40,15,2100,900,earn money crypto airdrop click link,False,True,False,,0.85,1
+follow4follow7731,,15,8,1900,300,free followers winner,False,True,,0.02,0.70,1
+acme.bank_hq,acmebank,30,140,700,60,official hq account,True,True,False,0.79,0.30,1
+jess_online4410,acmebank,55,22,400,200,,False,False,False,0.05,0.50,1
