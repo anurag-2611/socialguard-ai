@@ -25,10 +25,29 @@ SERVICE_VERSION = "0.2.0"
 TOP_CONTRIBUTIONS = 8
 logger = logging.getLogger("ml-service")
 
+DEFAULT_DEV_ORIGINS = (
+    "http://localhost:5173,http://127.0.0.1:5173,http://10.244.202.218:5173"
+)
+
 
 def _default_model_dir() -> Path:
     base = Path(os.environ.get("MODEL_DIR", "/app/models"))
     return base / os.environ.get("ACTIVE_MODEL_VERSION", "v1")
+
+
+def _allowed_origins() -> list[str]:
+    """Read allowed browser origins from CORS_ORIGINS (or ALLOWED_ORIGINS).
+
+    Value is a comma-separated list, e.g.
+    https://socialguard-ai-2.onrender.com
+    Falls back to local development origins when neither variable is set.
+    """
+    raw = (
+        os.environ.get("CORS_ORIGINS")
+        or os.environ.get("ALLOWED_ORIGINS")
+        or DEFAULT_DEV_ORIGINS
+    )
+    return [o.strip().rstrip("/") for o in raw.split(",") if o.strip()]
 
 
 def create_app(model_dir: Path | None = None) -> FastAPI:
@@ -48,21 +67,12 @@ def create_app(model_dir: Path | None = None) -> FastAPI:
 
     app = FastAPI(title="SocialGuard ML Service", version=SERVICE_VERSION, lifespan=lifespan)
 
-    # Local development only: lets the browser demo UI call this service directly.
-    # In production the ML service is private and only the backend calls it.
-    origins = [
-        o.strip()
-        for o in os.environ.get(
-            "CORS_ORIGINS",
-            "http://localhost:5173,http://127.0.0.1:5173,http://10.244.202.218:5173",
-        ).split(",")
-        if o.strip()
-    ]
+    # Browser access: allows the deployed frontend (and local dev) to call this service.
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=origins,
-        allow_methods=["GET", "POST"],
-        allow_headers=["content-type"],
+        allow_origins=_allowed_origins(),
+        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_headers=["*"],
     )
 
     def require_model() -> LoadedModel:
