@@ -62,45 +62,55 @@ function Shell() {
   const items = NAV.filter((n) => n.any.length === 0 || n.any.some((p) => can(user.role, p)));
 
   return (
-    <div className="flex min-h-screen bg-slate-100 text-slate-900">
-      <aside className="flex w-60 shrink-0 flex-col bg-slate-900 text-slate-200 print:hidden">
-        <div className="px-5 py-5">
-          <p className="text-base font-semibold tracking-tight text-white">SocialGuard AI</p>
-          <p className="text-xs text-slate-400">Risk assessment workspace</p>
+    <div className="flex min-h-screen flex-col bg-slate-100 text-slate-900 lg:flex-row">
+      <aside className="flex w-full shrink-0 flex-col bg-slate-900 text-slate-200 print:hidden lg:w-60">
+        <div className="flex items-center justify-between gap-3 px-4 py-4 lg:block lg:px-5 lg:py-5">
+          <div>
+            <p className="text-base font-semibold tracking-tight text-white">SocialGuard AI</p>
+            <p className="text-xs text-slate-400">Risk assessment workspace</p>
+          </div>
         </div>
-        <nav className="flex-1 space-y-0.5 px-3" aria-label="Main">
+        <nav className="flex flex-wrap gap-2 px-3 py-2 lg:flex-1 lg:flex-col lg:space-y-0.5 lg:gap-0 lg:p-0" aria-label="Main">
           {items.map((n) => (
             <NavLink
               key={n.to}
               to={n.to}
               end={n.to === '/'}
               className={({ isActive }) =>
-                cx('block rounded-md px-3 py-2 text-sm', isActive ? 'bg-slate-700 text-white' : 'text-slate-300 hover:bg-slate-800')
+                cx(
+                  'block rounded-md px-3 py-2 text-sm',
+                  isActive ? 'bg-slate-700 text-white' : 'text-slate-300 hover:bg-slate-800',
+                  'w-full lg:w-auto'
+                )
               }
             >
               {n.label}
             </NavLink>
           ))}
         </nav>
-        <div className="border-t border-slate-800 p-4 text-xs">
-          <p className="font-medium text-white">{user.name}</p>
-          <p className="text-slate-400">{ROLE_LABEL[user.role]}</p>
-          <button
-            className="mt-3 w-full rounded-md border border-slate-600 px-3 py-1.5 text-slate-200 hover:bg-slate-800"
-            onClick={() => {
-              logout();
-              navigate('/login');
-            }}
-          >
-            Sign out
-          </button>
+        <div className="border-t border-slate-800 p-4 text-xs lg:p-4">
+          <div className="flex items-center justify-between gap-3 lg:block">
+            <div>
+              <p className="font-medium text-white">{user.name}</p>
+              <p className="text-slate-400">{ROLE_LABEL[user.role]}</p>
+            </div>
+            <button
+              className="rounded-md border border-slate-600 px-3 py-1.5 text-slate-200 hover:bg-slate-800 lg:mt-3 lg:w-full"
+              onClick={() => {
+                logout();
+                navigate('/login');
+              }}
+            >
+              Sign out
+            </button>
+          </div>
         </div>
       </aside>
       <div className="flex min-w-0 flex-1 flex-col">
         <div className="bg-amber-100 px-4 py-1.5 text-center text-xs text-amber-900 print:hidden">
           <strong>Demo mode:</strong> sign-in, cases and reports are stored in this browser only. The backend is not connected yet.
         </div>
-        <header className="flex items-center justify-end gap-3 border-b border-slate-200 bg-white px-6 py-2 text-xs print:hidden">
+        <header className="flex flex-wrap items-center justify-center gap-2 border-b border-slate-200 bg-white px-4 py-2 text-xs print:hidden lg:justify-end lg:px-6">
           <span className="text-slate-500">ML service</span>
           {health?.model_loaded ? (
             <span className="rounded bg-emerald-50 px-2 py-0.5 font-medium text-emerald-700 ring-1 ring-emerald-200">online, model loaded</span>
@@ -110,7 +120,7 @@ function Shell() {
             <span className="rounded bg-red-50 px-2 py-0.5 font-medium text-red-700 ring-1 ring-red-200">{offline ? 'offline' : 'checking'}</span>
           )}
         </header>
-        <main className="mx-auto w-full max-w-6xl flex-1 px-6 py-6">
+        <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-4 sm:px-6 lg:px-6 lg:py-6">
           <Outlet />
         </main>
       </div>
